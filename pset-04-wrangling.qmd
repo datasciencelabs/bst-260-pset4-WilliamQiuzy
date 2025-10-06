@@ -342,66 +342,48 @@ Use **httr2** to download COVID-19 death data from this endpoint. Make sure to r
 
 
 ```{r}
-library(readr)
+deaths_req <- request(deaths_url) |>
+  req_url_query('$limit' = 100000000)
 
-resp <- request(deaths_url) |>
-  req_url_query(`$limit` = 10000000000) |>
-  req_perform()
+deaths_resp <- req_perform(deaths_req)
 
-raw_deaths <- resp_body_json(resp, simplifyVector = TRUE) |>
-  as_tibble() |>
-  clean_names()
+deaths_raw <- resp_body_json(deaths_resp, simplifyVector = TRUE) |>
+  as_tibble()
 
-pick_first <- function(cands, df) {
-  hit <- names(df)[names(df) %in% cands]
-  if (length(hit) == 0) NULL else hit[[1]]
-}
-parse_cdc_date <- function(x) {
-  d <- suppressWarnings(ymd(x))
-  if (all(is.na(d))) d <- suppressWarnings(ymd_hms(x))
-  if (all(is.na(d))) d <- suppressWarnings(mdy(x))
-  as_date(d)
-}
-
-state_col  <- pick_first(c("state","jurisdiction","state_name","name"), raw_deaths)
-date_col   <- pick_first(c("end_date","week_end","week_ending","submission_date","report_date","as_of","date"), raw_deaths)
-deaths_col <- pick_first(c("covid_19_deaths","new_deaths","new_death","deaths","tot_death","total_deaths","death"), raw_deaths)
-
-deaths <- raw_deaths |>
+deaths <- deaths_raw |>
   transmute(
-    state  = as.character(.data[[state_col]]),
-    date   = parse_cdc_date(.data[[date_col]]),
-    deaths = parse_number(.data[[deaths_col]])
+    state = state,
+    date = as_date(end_date),
+    deaths = as.numeric(covid_19_deaths)
   ) |>
-  filter(!is.na(state), !is.na(date), !is.na(deaths)) |>
+  filter(!is.na(date), !is.na(state), !is.na(deaths)) |>
   arrange(state, date)
 
-deaths
+glimpse(deaths)
+
 ```
 
 15. Using the `deaths` dataset you created, make a bar plot showing the total COVID-19 deaths by state. Show only the top 10 states with the highest death counts. Order the bars from highest to lowest and use appropriate labels and title.
 
 ```{r}
-library(scales)
-
-top10_deaths <- deaths |>
-  mutate(date = ymd(date),
-         year = year(date)) |>
-  filter(year %in% c(2020, 2021)) |>
-
-  filter(!state %in% c("United States", "New York City")) |>
+deaths_by_state <- deaths |>
+  filter(state %in% population$state_name) |>
   group_by(state) |>
-  summarise(total_deaths = sum(as.numeric(deaths), na.rm = TRUE), .groups = "drop") |>
-  arrange(desc(total_deaths)) |>
-  slice_head(n = 10)
+  summarise(state_total_deaths = sum(deaths, na.rm = TRUE), .groups = "drop") |>
+  arrange(desc(state_total_deaths)) |>
+  slice_head(n=10)
 
-ggplot(top10_deaths, aes(x = reorder(state, total_deaths), y = total_deaths)) +
+ggplot(deaths_by_state, aes(x = reorder(state, state_total_deaths), y = state_total_deaths)) +
   geom_col() +
   coord_flip() +
-  scale_y_continuous(labels = label_comma()) +
   labs(
     x = "State",
-    y = "Total deaths"
+    y = "Total COVID-19 Deaths"
   ) +
-  theme_minimal(base_size = 13)
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 10),
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+
 ```
